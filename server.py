@@ -18,7 +18,7 @@ import os
 import random
 import threading
 import time
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 # google.oauth2/googleapiclient are deliberately NOT imported at module
 # level (see _ensure_google_imports()) -- the `google` namespace package's
@@ -294,7 +294,7 @@ def _require(value: Optional[str], field_name: str) -> str:
     return value.strip()
 
 
-def _parse_parameters(raw: Optional[str], field_name: str) -> List[dict]:
+def _parse_parameters(raw: Optional[Union[str, list]], field_name: str) -> List[dict]:
     """Parse a JSON array of GTM Parameter objects.
 
     GTM's Tag/Trigger/Variable ``parameter`` field is a list of objects like
@@ -306,21 +306,29 @@ def _parse_parameters(raw: Optional[str], field_name: str) -> List[dict]:
     duplicated here.
 
     Args:
-        raw: JSON array string, or None/empty for no parameters.
+        raw: JSON array string, an already-parsed list (some MCP clients
+            pre-parse JSON-array-shaped string arguments into native lists
+            before the call reaches this server, despite the declared
+            string type -- accepting both avoids a confusing type error for
+            callers who did nothing wrong), or None/empty for no parameters.
         field_name: Name of the parameter, used in error messages.
 
     Returns:
         Parsed list of parameter dicts (empty list if raw is None/empty).
 
     Raises:
-        ValueError: If raw is non-empty but not valid JSON, or not a list.
+        ValueError: If raw is a non-empty string that isn't valid JSON, or
+            resolves to something other than a list.
     """
-    if not raw or not raw.strip():
+    if raw is None or raw == "" or raw == []:
         return []
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{field_name} must be valid JSON: {exc}") from None
+    if isinstance(raw, list):
+        parsed = raw
+    else:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{field_name} must be valid JSON: {exc}") from None
     if not isinstance(parsed, list):
         raise ValueError(f"{field_name} must be a JSON array of Parameter objects.")
     return parsed
@@ -501,7 +509,7 @@ def create_tag(
     workspace_path: str,
     name: str,
     tag_type: str,
-    parameter: Optional[str] = None,
+    parameter: Optional[Union[str, list]] = None,
     firing_trigger_id: Optional[str] = None,
 ) -> str:
     """Create a tag in a GTM workspace (draft -- has no effect until published).
@@ -593,7 +601,7 @@ def create_trigger(
     workspace_path: str,
     name: str,
     trigger_type: str,
-    filter_: Optional[str] = None,
+    filter_: Optional[Union[str, list]] = None,
 ) -> str:
     """Create a trigger in a GTM workspace (draft -- has no effect until published).
 
@@ -675,7 +683,7 @@ def create_variable(
     workspace_path: str,
     name: str,
     variable_type: str,
-    parameter: Optional[str] = None,
+    parameter: Optional[Union[str, list]] = None,
 ) -> str:
     """Create a user-defined variable in a GTM workspace (draft -- has no
     effect until published).
