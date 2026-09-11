@@ -571,6 +571,101 @@ def create_tag(
 
 @mcp.tool(annotations=_READ_REMOTE)
 @rate_limited("tool_calls")
+def get_tag(tag_path: str) -> str:
+    """Fetch the full raw JSON of a single tag, firingTriggerId included.
+
+    ``list_tags`` only returns {tagId, name, type, path} -- this tool
+    exists for inspecting/debugging a tag's actual firingTriggerId and
+    parameter contents (e.g. confirming a create_tag call actually
+    attached the intended trigger).
+
+    Args:
+        tag_path: A tag's ``path``, from create_tag or list_tags.
+
+    Returns:
+        The full raw tag resource as returned by the GTM API,
+        JSON-formatted.
+
+    Raises:
+        ValueError: If tag_path is missing.
+    """
+    tag_path = _require(tag_path, "tag_path")
+    client = _get_client()
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().tags()
+        .get(path=tag_path).execute(),
+        "tags.get",
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool(annotations=_WRITE_DRAFT)
+@rate_limited("tool_calls")
+def update_tag(
+    tag_path: str,
+    name: Optional[str] = None,
+    parameter: Optional[Union[str, list]] = None,
+    firing_trigger_id: Optional[str] = None,
+) -> str:
+    """Update an existing tag in a GTM workspace (draft -- has no effect until published).
+
+    GTM's API is a full-replace PUT on the tag resource, not a partial
+    PATCH -- this tool fetches the current tag first and merges only the
+    fields the caller actually passed on top of it, so e.g. attaching a
+    missing firingTriggerId does not accidentally wipe the tag's
+    existing parameter list.
+
+    Args:
+        tag_path: A tag's ``path``, from create_tag or list_tags (e.g.
+            'accounts/1/containers/9/workspaces/5/tags/12').
+        name: New tag name, or None to leave unchanged.
+        parameter: JSON array of GTM Parameter objects to replace the
+            tag's current ``parameter``, or None to leave unchanged.
+        firing_trigger_id: Comma-separated trigger IDs to replace the
+            tag's current ``firingTriggerId``, or None to leave
+            unchanged. Pass an empty string to clear it.
+
+    Returns:
+        JSON string with tagId, name, type, and path of the updated tag.
+
+    Raises:
+        ValueError: If tag_path is missing, or parameter (when provided
+            but not valid JSON) is invalid.
+    """
+    tag_path = _require(tag_path, "tag_path")
+    client = _get_client()
+
+    current = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().tags()
+        .get(path=tag_path).execute(),
+        "tags.get",
+    )
+
+    body = dict(current)
+    if name is not None:
+        body["name"] = _require(name, "name")
+    if parameter is not None:
+        body["parameter"] = _parse_parameters(parameter, "parameter")
+    if firing_trigger_id is not None:
+        body["firingTriggerId"] = [
+            t.strip() for t in firing_trigger_id.split(",") if t.strip()
+        ]
+
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().tags()
+        .update(path=tag_path, body=body).execute(),
+        "tags.update",
+    )
+    return json.dumps({
+        "tagId": result["tagId"],
+        "name": result["name"],
+        "type": result["type"],
+        "path": result["path"],
+    }, indent=2)
+
+
+@mcp.tool(annotations=_READ_REMOTE)
+@rate_limited("tool_calls")
 def list_triggers(workspace_path: str) -> str:
     """List triggers in a GTM workspace.
 

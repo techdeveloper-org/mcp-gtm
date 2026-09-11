@@ -200,6 +200,56 @@ class TestCreateTag(unittest.TestCase):
         self.assertNotIn("firingTriggerId", kwargs["body"])
 
 
+class TestGetTag(unittest.TestCase):
+
+    def test_returns_full_raw_tag_json(self):
+        mod = _load_module()
+        raw = {"tagId": "26", "name": "T", "type": "gaawe", "path": "p", "firingTriggerId": ["18"]}
+        client, node = _mock_client_returning("accounts.containers.workspaces.tags", raw)
+        with patch("server._get_client", return_value=client):
+            result = mod.get_tag("p")
+        self.assertEqual(json.loads(result), raw)
+
+    def test_requires_tag_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.get_tag("")
+
+
+class TestUpdateTag(unittest.TestCase):
+
+    def test_attaches_firing_trigger_without_dropping_parameters(self):
+        mod = _load_module()
+        client = MagicMock()
+        node = client.accounts.return_value.containers.return_value.workspaces.return_value.tags.return_value
+        current = {
+            "tagId": "26", "name": "GA4 Event - view_item", "type": "gaawe",
+            "path": "accounts/1/containers/9/workspaces/5/tags/26",
+            "parameter": [{"type": "template", "key": "eventName", "value": "view_item"}],
+        }
+        node.get.return_value.execute.return_value = current
+        node.update.return_value.execute.return_value = {**current, "firingTriggerId": ["18"]}
+
+        with patch("server._get_client", return_value=client):
+            result = mod.update_tag(
+                "accounts/1/containers/9/workspaces/5/tags/26",
+                firing_trigger_id="18",
+            )
+        data = json.loads(result)
+        self.assertEqual(data["tagId"], "26")
+        _, kwargs = node.update.call_args
+        self.assertEqual(kwargs["body"]["firingTriggerId"], ["18"])
+        # parameter was not passed -- must survive untouched
+        self.assertEqual(kwargs["body"]["parameter"], current["parameter"])
+
+    def test_requires_tag_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.update_tag("")
+
+
 class TestUpdateTrigger(unittest.TestCase):
 
     def test_merges_filter_onto_existing_trigger_without_dropping_other_fields(self):
