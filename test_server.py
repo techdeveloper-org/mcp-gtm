@@ -127,6 +127,26 @@ class TestCreateWorkspace(unittest.TestCase):
                 mod.create_workspace("accounts/1/containers/9", "   ")
 
 
+class TestGetTrigger(unittest.TestCase):
+
+    def test_returns_full_raw_trigger_json(self):
+        mod = _load_module()
+        raw = {
+            "triggerId": "5", "name": "T", "type": "pageview", "path": "p",
+            "filter": [{"type": "contains", "negate": True, "parameter": []}],
+        }
+        client, node = _mock_client_returning("accounts.containers.workspaces.triggers", raw)
+        with patch("server._get_client", return_value=client):
+            result = mod.get_trigger("p")
+        self.assertEqual(json.loads(result), raw)
+
+    def test_requires_trigger_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.get_trigger("")
+
+
 class TestCreateTag(unittest.TestCase):
 
     def test_creates_tag_with_parsed_parameters_and_triggers(self):

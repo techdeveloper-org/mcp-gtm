@@ -600,6 +600,37 @@ def list_triggers(workspace_path: str) -> str:
     }, indent=2)
 
 
+@mcp.tool(annotations=_READ_REMOTE)
+@rate_limited("tool_calls")
+def get_trigger(trigger_path: str) -> str:
+    """Fetch the full raw JSON of a single trigger, filter included.
+
+    ``list_triggers`` only returns {triggerId, name, type, path} -- this
+    tool exists for inspecting/debugging a trigger's actual filter and
+    customEventFilter contents (e.g. confirming a negate flag actually
+    persisted).
+
+    Args:
+        trigger_path: A trigger's ``path``, from create_trigger or
+            list_triggers.
+
+    Returns:
+        The full raw trigger resource as returned by the GTM API,
+        JSON-formatted.
+
+    Raises:
+        ValueError: If trigger_path is missing.
+    """
+    trigger_path = _require(trigger_path, "trigger_path")
+    client = _get_client()
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().triggers()
+        .get(path=trigger_path).execute(),
+        "triggers.get",
+    )
+    return json.dumps(result, indent=2)
+
+
 @mcp.tool(annotations=_WRITE_DRAFT)
 @rate_limited("tool_calls")
 def create_trigger(
