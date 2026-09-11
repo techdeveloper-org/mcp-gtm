@@ -602,6 +602,7 @@ def create_trigger(
     name: str,
     trigger_type: str,
     filter_: Optional[Union[str, list]] = None,
+    custom_event_filter: Optional[Union[str, list]] = None,
 ) -> str:
     """Create a trigger in a GTM workspace (draft -- has no effect until published).
 
@@ -612,25 +613,38 @@ def create_trigger(
         trigger_type: GTM trigger type id (e.g. 'pageview', 'click',
             'customEvent', 'formSubmission').
         filter_: JSON array of GTM Condition objects restricting when the
-            trigger fires (e.g. matching a specific page path or event
-            name), or None to fire on every instance of trigger_type.
+            trigger fires (e.g. matching a specific page path), or None to
+            fire on every instance of trigger_type. For 'customEvent'
+            triggers, GTM's API requires the event-name match to live in
+            ``custom_event_filter`` instead (a separate field, not this
+            one) -- ``filter_`` on a customEvent trigger is only for
+            *additional* AND-ed conditions beyond the event name.
+        custom_event_filter: JSON array with exactly one GTM Condition
+            object matching the event name, required by GTM's API for
+            'customEvent'-type triggers specifically (e.g.
+            '[{"type":"equals","parameter":[{"type":"template","key":"arg0","value":"{{_event}}"},{"type":"template","key":"arg1","value":"generate_lead"}]}]').
+            Ignored for other trigger types.
 
     Returns:
         JSON string with triggerId, name, type, and path of the created
         trigger.
 
     Raises:
-        ValueError: If workspace_path, name, trigger_type, or filter_ (when
-            provided but not valid JSON) are invalid.
+        ValueError: If workspace_path, name, trigger_type, filter_, or
+            custom_event_filter (when provided but not valid JSON) are
+            invalid.
     """
     workspace_path = _require(workspace_path, "workspace_path")
     name = _require(name, "name")
     trigger_type = _require(trigger_type, "trigger_type")
     conditions = _parse_parameters(filter_, "filter_")
+    custom_event_conditions = _parse_parameters(custom_event_filter, "custom_event_filter")
 
     body = {"name": name, "type": trigger_type}
     if conditions:
         body["filter"] = conditions
+    if custom_event_conditions:
+        body["customEventFilter"] = custom_event_conditions
 
     client = _get_client()
     result = _call_with_retry(
