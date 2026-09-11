@@ -200,6 +200,62 @@ class TestCreateTag(unittest.TestCase):
         self.assertNotIn("firingTriggerId", kwargs["body"])
 
 
+class TestGetVariable(unittest.TestCase):
+
+    def test_returns_full_raw_variable_json(self):
+        mod = _load_module()
+        raw = {
+            "variableId": "11", "name": "DLV - items", "type": "v", "path": "p",
+            "parameter": [{"type": "template", "key": "name", "value": "items"}],
+        }
+        client, node = _mock_client_returning("accounts.containers.workspaces.variables", raw)
+        with patch("server._get_client", return_value=client):
+            result = mod.get_variable("p")
+        self.assertEqual(json.loads(result), raw)
+
+    def test_requires_variable_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.get_variable("")
+
+
+class TestUpdateVariable(unittest.TestCase):
+
+    def test_renames_data_layer_key_without_dropping_type(self):
+        mod = _load_module()
+        client = MagicMock()
+        node = client.accounts.return_value.containers.return_value.workspaces.return_value.variables.return_value
+        current = {
+            "variableId": "11", "name": "DLV - items", "type": "v",
+            "path": "accounts/1/containers/9/workspaces/5/variables/11",
+            "parameter": [{"type": "template", "key": "name", "value": "items"}],
+        }
+        node.get.return_value.execute.return_value = current
+        node.update.return_value.execute.return_value = {**current}
+
+        with patch("server._get_client", return_value=client):
+            result = mod.update_variable(
+                "accounts/1/containers/9/workspaces/5/variables/11",
+                parameter='[{"type":"template","key":"name","value":"eventModel.items"}]',
+            )
+        data = json.loads(result)
+        self.assertEqual(data["variableId"], "11")
+        _, kwargs = node.update.call_args
+        self.assertEqual(
+            kwargs["body"]["parameter"],
+            [{"type": "template", "key": "name", "value": "eventModel.items"}],
+        )
+        # type was not passed -- must survive untouched
+        self.assertEqual(kwargs["body"]["type"], "v")
+
+    def test_requires_variable_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.update_variable("")
+
+
 class TestGetTag(unittest.TestCase):
 
     def test_returns_full_raw_tag_json(self):

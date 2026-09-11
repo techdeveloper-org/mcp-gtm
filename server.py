@@ -941,6 +941,99 @@ def create_variable(
     }, indent=2)
 
 
+@mcp.tool(annotations=_READ_REMOTE)
+@rate_limited("tool_calls")
+def get_variable(variable_path: str) -> str:
+    """Fetch the full raw JSON of a single variable, parameter list included.
+
+    ``list_variables`` only returns {variableId, name, type, path} -- this
+    tool exists for inspecting/debugging a variable's actual parameter
+    contents (e.g. confirming an update_variable call actually changed the
+    Data Layer Variable's key name).
+
+    Args:
+        variable_path: A variable's ``path``, from create_variable or
+            list_variables.
+
+    Returns:
+        The full raw variable resource as returned by the GTM API,
+        JSON-formatted.
+
+    Raises:
+        ValueError: If variable_path is missing.
+    """
+    variable_path = _require(variable_path, "variable_path")
+    client = _get_client()
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().variables()
+        .get(path=variable_path).execute(),
+        "variables.get",
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool(annotations=_WRITE_DRAFT)
+@rate_limited("tool_calls")
+def update_variable(
+    variable_path: str,
+    name: Optional[str] = None,
+    variable_type: Optional[str] = None,
+    parameter: Optional[Union[str, list]] = None,
+) -> str:
+    """Update an existing variable in a GTM workspace (draft -- has no effect until published).
+
+    GTM's API is a full-replace PUT on the variable resource, not a partial
+    PATCH -- this tool fetches the current variable first and merges only
+    the fields the caller actually passed on top of it, so e.g. renaming a
+    Data Layer Variable's key does not accidentally wipe other fields.
+
+    Args:
+        variable_path: A variable's ``path``, from create_variable or
+            list_variables (e.g.
+            'accounts/1/containers/9/workspaces/5/variables/12').
+        name: New variable name, or None to leave unchanged.
+        variable_type: New GTM variable type id, or None to leave unchanged.
+        parameter: JSON array of GTM Parameter objects to replace the
+            variable's current ``parameter``, or None to leave unchanged.
+
+    Returns:
+        JSON string with variableId, name, type, and path of the updated
+        variable.
+
+    Raises:
+        ValueError: If variable_path is missing, or parameter (when
+            provided but not valid JSON) is invalid.
+    """
+    variable_path = _require(variable_path, "variable_path")
+    client = _get_client()
+
+    current = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().variables()
+        .get(path=variable_path).execute(),
+        "variables.get",
+    )
+
+    body = dict(current)
+    if name is not None:
+        body["name"] = _require(name, "name")
+    if variable_type is not None:
+        body["type"] = _require(variable_type, "variable_type")
+    if parameter is not None:
+        body["parameter"] = _parse_parameters(parameter, "parameter")
+
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().variables()
+        .update(path=variable_path, body=body).execute(),
+        "variables.update",
+    )
+    return json.dumps({
+        "variableId": result["variableId"],
+        "name": result["name"],
+        "type": result["type"],
+        "path": result["path"],
+    }, indent=2)
+
+
 @mcp.tool(annotations=_WRITE_DRAFT)
 @rate_limited("tool_calls")
 def create_version(workspace_path: str, name: str, notes: str = "") -> str:
