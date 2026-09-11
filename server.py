@@ -9,6 +9,8 @@ the write tools and Publish permission for publish_version -- holding the
 OAuth scopes below is necessary but not sufficient, same as GA4's Admin API.
 """
 
+from __future__ import annotations
+
 import functools
 import json
 import logging
@@ -18,9 +20,14 @@ import threading
 import time
 from typing import Any, Callable, List, Optional
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+# google.oauth2/googleapiclient are deliberately NOT imported at module
+# level (see _ensure_google_imports()) -- the `google` namespace package's
+# first touch in a fresh process measured 10-30+ seconds on this machine
+# (Windows Defender scanning the namespace across every installed google-*
+# package), which exceeds the MCP client's connection timeout and made this
+# server fail to complete its stdio handshake at all. `from __future__
+# import annotations` above makes every type hint in this file a lazy
+# string, so none of the names below need to exist at import time.
 
 try:
     from mcp.server.mcpserver import MCPServer
@@ -167,6 +174,31 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _client = None
 _client_lock = threading.Lock()
 
+_google_imports_loaded = False
+_import_lock = threading.Lock()
+
+
+def _ensure_google_imports() -> None:
+    """Import google.oauth2/googleapiclient on first use, not at module load.
+
+    See the module docstring comment above the (deliberately absent)
+    top-level imports for why: this measured 10-30+ seconds on this
+    machine, which blew past the MCP client's connection timeout and made
+    the server look unregistered even though the code was correct.
+    Deferring the import here means the handshake completes immediately;
+    only the first actual tool call pays this cost.
+    """
+    global _google_imports_loaded, service_account, build, HttpError
+    if _google_imports_loaded:
+        return
+    with _import_lock:
+        if _google_imports_loaded:
+            return
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.errors import HttpError
+        _google_imports_loaded = True
+
 
 def _get_client():
     """Return a cached, authenticated GTM API v2 client.
@@ -185,6 +217,7 @@ def _get_client():
     if _client is not None:
         return _client
 
+    _ensure_google_imports()
     with _client_lock:
         if _client is not None:
             return _client
@@ -216,6 +249,7 @@ def _call_with_retry(operation: Callable[[], Any], operation_name: str) -> Any:
         googleapiclient.errors.HttpError: The final failure once the retry
             budget is exhausted, or immediately for non-transient errors.
     """
+    _ensure_google_imports()
     for attempt in range(_MAX_RETRIES + 1):
         try:
             return operation()
