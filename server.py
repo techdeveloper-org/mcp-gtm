@@ -665,6 +665,73 @@ def create_trigger(
     }, indent=2)
 
 
+@mcp.tool(annotations=_WRITE_DRAFT)
+@rate_limited("tool_calls")
+def update_trigger(
+    trigger_path: str,
+    name: Optional[str] = None,
+    filter_: Optional[Union[str, list]] = None,
+    custom_event_filter: Optional[Union[str, list]] = None,
+) -> str:
+    """Update an existing trigger in a GTM workspace (draft -- has no effect until published).
+
+    GTM's API is a full-replace PUT on the trigger resource, not a partial
+    PATCH -- this tool fetches the current trigger first and merges only the
+    fields the caller actually passed on top of it, so an update that only
+    intends to fix ``filter_`` (e.g. adding a missing ``negate`` flag) does
+    not accidentally wipe ``customEventFilter`` or other fields it didn't
+    touch.
+
+    Args:
+        trigger_path: A trigger's ``path``, from create_trigger or
+            list_triggers (e.g.
+            'accounts/1/containers/9/workspaces/5/triggers/12').
+        name: New trigger name, or None to leave unchanged.
+        filter_: JSON array of GTM Condition objects to replace the
+            trigger's current ``filter``, or None to leave unchanged. Pass
+            an explicit empty list ``[]`` to clear it.
+        custom_event_filter: JSON array to replace the trigger's current
+            ``customEventFilter``, or None to leave unchanged. Pass an
+            explicit empty list ``[]`` to clear it.
+
+    Returns:
+        JSON string with triggerId, name, type, and path of the updated
+        trigger.
+
+    Raises:
+        ValueError: If trigger_path is missing, or filter_/custom_event_filter
+            (when provided but not valid JSON) are invalid.
+    """
+    trigger_path = _require(trigger_path, "trigger_path")
+    client = _get_client()
+
+    current = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().triggers()
+        .get(path=trigger_path).execute(),
+        "triggers.get",
+    )
+
+    body = dict(current)
+    if name is not None:
+        body["name"] = _require(name, "name")
+    if filter_ is not None:
+        body["filter"] = _parse_parameters(filter_, "filter_")
+    if custom_event_filter is not None:
+        body["customEventFilter"] = _parse_parameters(custom_event_filter, "custom_event_filter")
+
+    result = _call_with_retry(
+        lambda: client.accounts().containers().workspaces().triggers()
+        .update(path=trigger_path, body=body).execute(),
+        "triggers.update",
+    )
+    return json.dumps({
+        "triggerId": result["triggerId"],
+        "name": result["name"],
+        "type": result["type"],
+        "path": result["path"],
+    }, indent=2)
+
+
 @mcp.tool(annotations=_READ_REMOTE)
 @rate_limited("tool_calls")
 def list_variables(workspace_path: str) -> str:

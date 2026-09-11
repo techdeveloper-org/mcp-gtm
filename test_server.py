@@ -54,7 +54,7 @@ def _mock_client_returning(resource_chain, execute_result):
     node = client
     for name in resource_chain.split("."):
         node = getattr(node, name).return_value
-    for request_method in ("list", "create", "publish", "create_version"):
+    for request_method in ("list", "create", "publish", "create_version", "get", "update"):
         getattr(node, request_method).return_value.execute.return_value = execute_result
     return client, node
 
@@ -178,6 +178,84 @@ class TestCreateTag(unittest.TestCase):
         _, kwargs = node.create.call_args
         self.assertNotIn("parameter", kwargs["body"])
         self.assertNotIn("firingTriggerId", kwargs["body"])
+
+
+class TestUpdateTrigger(unittest.TestCase):
+
+    def test_merges_filter_onto_existing_trigger_without_dropping_other_fields(self):
+        mod = _load_module()
+        client = MagicMock()
+        node = client.accounts.return_value.containers.return_value.workspaces.return_value.triggers.return_value
+        current = {
+            "triggerId": "5",
+            "name": "Page View - static pages (not /products/)",
+            "type": "pageview",
+            "path": "accounts/1/containers/9/workspaces/5/triggers/5",
+            "filter": [{"type": "contains", "parameter": [
+                {"type": "template", "key": "arg0", "value": "{{JS - Page Path}}"},
+                {"type": "template", "key": "arg1", "value": "/products/"},
+            ]}],
+            "customEventFilter": [{"type": "equals", "parameter": []}],
+        }
+        updated = dict(current)
+        node.get.return_value.execute.return_value = current
+        node.update.return_value.execute.return_value = updated
+
+        fixed_filter = [{"type": "contains", "negate": True, "parameter": [
+            {"type": "template", "key": "arg0", "value": "{{JS - Page Path}}"},
+            {"type": "template", "key": "arg1", "value": "/products/"},
+        ]}]
+        with patch("server._get_client", return_value=client):
+            result = mod.update_trigger(
+                "accounts/1/containers/9/workspaces/5/triggers/5",
+                filter_=fixed_filter,
+            )
+        data = json.loads(result)
+        self.assertEqual(data["triggerId"], "5")
+        _, kwargs = node.update.call_args
+        self.assertEqual(kwargs["body"]["filter"], fixed_filter)
+        # customEventFilter was not passed to update_trigger -- must survive untouched
+        self.assertEqual(kwargs["body"]["customEventFilter"], current["customEventFilter"])
+        self.assertEqual(kwargs["body"]["name"], current["name"])
+
+    def test_updates_name_only_when_filter_not_provided(self):
+        mod = _load_module()
+        client = MagicMock()
+        node = client.accounts.return_value.containers.return_value.workspaces.return_value.triggers.return_value
+        current = {
+            "triggerId": "5", "name": "Old Name", "type": "pageview",
+            "path": "accounts/1/containers/9/workspaces/5/triggers/5",
+            "filter": [{"type": "contains", "parameter": []}],
+        }
+        node.get.return_value.execute.return_value = current
+        node.update.return_value.execute.return_value = {**current, "name": "New Name"}
+
+        with patch("server._get_client", return_value=client):
+            mod.update_trigger(
+                "accounts/1/containers/9/workspaces/5/triggers/5",
+                name="New Name",
+            )
+        _, kwargs = node.update.call_args
+        self.assertEqual(kwargs["body"]["name"], "New Name")
+        # filter was not passed -- must survive untouched from the fetched current trigger
+        self.assertEqual(kwargs["body"]["filter"], current["filter"])
+
+    def test_requires_trigger_path(self):
+        mod = _load_module()
+        with patch("server._get_client", return_value=MagicMock()):
+            with self.assertRaises(ValueError):
+                mod.update_trigger("")
+
+    def test_rejects_invalid_filter_json(self):
+        mod = _load_module()
+        client = MagicMock()
+        node = client.accounts.return_value.containers.return_value.workspaces.return_value.triggers.return_value
+        node.get.return_value.execute.return_value = {
+            "triggerId": "5", "name": "T", "type": "pageview", "path": "p",
+        }
+        with patch("server._get_client", return_value=client):
+            with self.assertRaises(ValueError):
+                mod.update_trigger("p", filter_="not json")
 
 
 class TestCreateVersionAndPublish(unittest.TestCase):
