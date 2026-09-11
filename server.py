@@ -155,11 +155,16 @@ CREDENTIALS_PATH = os.environ.get(
 )
 
 # GTM API v2 scopes. edit.containers covers create/update of workspaces,
-# tags, triggers, variables, and versions; publish is a separate scope
-# because publishing is a materially higher-risk action than drafting.
+# tags, triggers, and variables; edit.containerversions is a SEPARATE
+# scope specifically required by workspaces.create_version (discovered
+# live -- create_version fails with "insufficient authentication scopes"
+# without it, even though it's a draft-snapshot action, not a publish);
+# publish is its own scope because publishing is a materially higher-risk
+# action than drafting or snapshotting.
 _SCOPES = [
     "https://www.googleapis.com/auth/tagmanager.readonly",
     "https://www.googleapis.com/auth/tagmanager.edit.containers",
+    "https://www.googleapis.com/auth/tagmanager.edit.containerversions",
     "https://www.googleapis.com/auth/tagmanager.publish",
 ]
 
